@@ -2,7 +2,6 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Get the environment variable with the given name, panicking if it is not set.
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("`{}` should be set in the environment", name))
 }
@@ -19,6 +18,37 @@ fn rename_library(dst: &Path) {
     }
 }
 
+fn copy_dir_all(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).unwrap_or_else(|e| {
+        panic!("Failed to create directory {}: {e}", dst.display())
+    });
+    for entry in fs::read_dir(src).unwrap_or_else(|e| {
+        panic!("Failed to read directory {}: {e}", src.display())
+    }) {
+        let entry = entry.expect("Failed to read directory entry");
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type().expect("Failed to get file type").is_dir() {
+            copy_dir_all(&src_path, &dst_path);
+        } else {
+            fs::copy(&src_path, &dst_path).unwrap_or_else(|e| {
+                panic!("Failed to copy {} -> {}: {e}", src_path.display(), dst_path.display());
+            });
+        }
+    }
+}
+
+/// Try to resolve the submodule's git HEAD file for Cargo change detection.
+/// For a git submodule, `<submodule>/.git` is a file containing `gitdir: <path>`.
+fn resolve_submodule_head(submodule_dir: &Path) -> Option<PathBuf> {
+    let dot_git = submodule_dir.join(".git");
+    let content = fs::read_to_string(&dot_git).ok()?;
+    let gitdir_ref = content.strip_prefix("gitdir: ")?.trim();
+    let resolved = submodule_dir.join(gitdir_ref);
+    let head = resolved.join("HEAD");
+    head.exists().then_some(head)
+}
+
 fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
     let include_dir = out_dir
         .join("include")
@@ -26,65 +56,40 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         .into_string()
         .unwrap();
 
-    let tarball_path = manifest_dir.join("5.4.12.tar.gz");
-    let vectorscan_src_dir = out_dir.join("vectorscan-5.4.12");
+    let submodule_dir = manifest_dir.join("vectorscan");
+    let vectorscan_src_dir = out_dir.join("vectorscan-src");
+    let patchfile = manifest_dir.join("vectorscan-windows.patch");
 
-    // patch generated with `git diff --no-index`, applied with -p2
-    let patchfile = manifest_dir.join("vectorscan.patch");
-
-    // Extract release tarball
-    {
-        match std::fs::remove_dir_all(&vectorscan_src_dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => panic!("Failed to clean Vectorscan source directory: {e}"),
-        }
-        let infile =
-            File::open(tarball_path).expect("Failed to open Vectorscan release tarball");
-        let gz = flate2::read::GzDecoder::new(infile);
-        let mut tar = tar::Archive::new(gz);
-        for entry in tar.entries().expect("Failed to read tarball entries") {
-            let mut entry = entry.expect("Failed to read tarball entry");
-            let path = entry.path().expect("Failed to read entry path").into_owned();
-            let stripped: PathBuf = path.components().skip(1).collect();
-            if stripped.as_os_str().is_empty() {
-                continue;
-            }
-            let dest = vectorscan_src_dir.join(&stripped);
-            if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).expect("Failed to create parent directory");
-            }
-            entry.unpack(&dest).expect("Failed to unpack tarball entry");
-        }
-        eprintln!("Tarball extracted to {}", vectorscan_src_dir.display());
-    }
-
-    eprintln!(
-        "Vectorscan source directory is at {}",
-        vectorscan_src_dir.display()
+    assert!(
+        submodule_dir.join("CMakeLists.txt").exists(),
+        "Vectorscan submodule not found at {}. Run: git submodule update --init",
+        submodule_dir.display()
     );
 
-    // Patch release tarball
+    match fs::remove_dir_all(&vectorscan_src_dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("Failed to clean vectorscan source directory: {e}"),
+    }
+    copy_dir_all(&submodule_dir, &vectorscan_src_dir);
+
     {
         let patchfile = File::open(&patchfile).expect("Failed to open patchfile");
         let output = Command::new("patch")
-            .arg("-p2")
+            .args(["-p1", "--forward"])
             .current_dir(&vectorscan_src_dir)
             .stdin(patchfile)
             .output()
             .expect("Failed to apply patchfile");
         assert!(
             output.status.success(),
-            "Failed to apply patch: {}",
+            "Failed to apply patch:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        eprintln!(
-            "Successfully applied patches to Vectorscan source directory at {}",
-            vectorscan_src_dir.display()
-        );
     }
+    eprintln!("Vectorscan source prepared at {}", vectorscan_src_dir.display());
 
-    // Build with cmake
     let mut cfg = cmake::Config::new(&vectorscan_src_dir);
     cfg.out_dir(out_dir);
 
@@ -126,19 +131,6 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         cfg.define("FAT_RUNTIME", "OFF");
     }
 
-    // NOTE: Several Vectorscan feature flags can be set based on available CPU SIMD features.
-    // Enabling these according to availability on the build system CPU is fragile, however:
-    // the resulting binary will not work correctly on machines with CPUs with different SIMD
-    // support.
-    //
-    // By default, we simply disable these options. However, using the `simd-specialization`
-    // feature flag, these Vectorscan features will be enabled if the build system's CPU
-    // supports them.
-    //
-    // See
-    // https://doc.rust-lang.org/reference/attributes/codegen.html#the-target_feature-attribute
-    // for supported target_feature values.
-
     if cfg!(feature = "simd_specialization") {
         macro_rules! x86_64_feature {
             () => {{
@@ -167,8 +159,6 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         }
 
         cfg.define("BUILD_AVX2", x86_64_feature!());
-        // XXX use avx512vbmi as a proxy for this, as it's not clear which particular avx512
-        // instructions are needed
         cfg.define("BUILD_AVX512", x86_64_feature!());
         cfg.define("BUILD_AVX512VBMI", x86_64_feature!());
 
@@ -240,15 +230,11 @@ fn main() {
     let is_windows_gnu = target_os == "windows" && target_env == "gnu";
     let is_windows_msvc = target_os == "windows" && target_env == "msvc";
 
-
     println!("cargo:rerun-if-env-changed=VECTORSCAN_LIB_DIR");
 
-    // Note: use `rerun-if-changed=build.rs` to indicate that this build script *shouldn't* be
-    // rerun: see https://doc.rust-lang.org/cargo/reference/build-scripts.html#change-detection
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=vectorscan.patch");
+    println!("cargo:rerun-if-changed=vectorscan-windows.patch");
 
-    // Features affect cmake configuration, so the build script must re-run when they change.
     // CARGO_FEATURE_* env vars are set by cargo when features are enabled.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FAT_RUNTIME");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_SIMD_SPECIALIZATION");
@@ -258,6 +244,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_WHOLE_ARCHIVE");
 
     let manifest_dir = PathBuf::from(env("CARGO_MANIFEST_DIR"));
+
+    // Fingerprint the submodule's git HEAD so that `git submodule update`
+    // automatically triggers a rebuild without scanning thousands of files.
+    if let Some(head_path) = resolve_submodule_head(&manifest_dir.join("vectorscan")) {
+        println!("cargo:rerun-if-changed={}", head_path.display());
+    }
+
     let out_dir = PathBuf::from(env("OUT_DIR"));
 
     if is_windows_msvc {
