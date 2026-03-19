@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -71,6 +71,35 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         Err(e) => panic!("Failed to clean vectorscan source directory: {e}"),
     }
     copy_dir_all(&submodule_dir, &vectorscan_src_dir);
+
+    let patches_dir = manifest_dir.join("patches");
+    if patches_dir.is_dir() {
+        let mut patches: Vec<_> = fs::read_dir(&patches_dir)
+            .expect("Failed to read patches directory")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "patch"))
+            .map(|e| e.path())
+            .collect();
+        patches.sort();
+        for patch_path in &patches {
+            let patchfile = File::open(patch_path)
+                .unwrap_or_else(|e| panic!("Failed to open {}: {e}", patch_path.display()));
+            let output = Command::new("patch")
+                .args(["-p1", "--forward"])
+                .current_dir(&vectorscan_src_dir)
+                .stdin(patchfile)
+                .output()
+                .unwrap_or_else(|e| panic!("Failed to run patch for {}: {e}", patch_path.display()));
+            assert!(
+                output.status.success(),
+                "Failed to apply {}:\nstdout: {}\nstderr: {}",
+                patch_path.display(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            eprintln!("Applied {}", patch_path.file_name().unwrap().to_string_lossy());
+        }
+    }
     eprintln!("Vectorscan source prepared at {}", vectorscan_src_dir.display());
 
     let mut cfg = cmake::Config::new(&vectorscan_src_dir);
@@ -214,6 +243,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=VECTORSCAN_LIB_DIR");
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=patches");
 
     // CARGO_FEATURE_* env vars are set by cargo when features are enabled.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FAT_RUNTIME");
