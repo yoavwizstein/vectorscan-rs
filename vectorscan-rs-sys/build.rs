@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -58,7 +58,6 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
 
     let submodule_dir = manifest_dir.join("vectorscan");
     let vectorscan_src_dir = out_dir.join("vectorscan-src");
-    let patchfile = manifest_dir.join("vectorscan-windows.patch");
 
     assert!(
         submodule_dir.join("CMakeLists.txt").exists(),
@@ -72,22 +71,6 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         Err(e) => panic!("Failed to clean vectorscan source directory: {e}"),
     }
     copy_dir_all(&submodule_dir, &vectorscan_src_dir);
-
-    {
-        let patchfile = File::open(&patchfile).expect("Failed to open patchfile");
-        let output = Command::new("patch")
-            .args(["-p1", "--forward"])
-            .current_dir(&vectorscan_src_dir)
-            .stdin(patchfile)
-            .output()
-            .expect("Failed to apply patchfile");
-        assert!(
-            output.status.success(),
-            "Failed to apply patch:\nstdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
     eprintln!("Vectorscan source prepared at {}", vectorscan_src_dir.display());
 
     let mut cfg = cmake::Config::new(&vectorscan_src_dir);
@@ -112,11 +95,9 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
         .define("CMAKE_VERBOSE_MAKEFILE", "ON")
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("BUILD_STATIC_LIBS", "ON")
-        .define("WARNINGS_AS_ERRORS", "OFF")
         .define("BUILD_EXAMPLES", "OFF")
         .define("BUILD_BENCHMARKS", "OFF")
-        .define("BUILD_DOC", "OFF")
-        .define("BUILD_TOOLS", "OFF");
+        .define("BUILD_DOC", "OFF");
 
     cfg_define_feature!("BUILD_UNIT", "unit_hyperscan");
     cfg_define_feature!("USE_CPU_NAIVE", "cpu_native");
@@ -233,7 +214,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=VECTORSCAN_LIB_DIR");
 
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=vectorscan-windows.patch");
 
     // CARGO_FEATURE_* env vars are set by cargo when features are enabled.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FAT_RUNTIME");
