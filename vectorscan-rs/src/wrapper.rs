@@ -1,8 +1,25 @@
 use crate::error::{AsResult, Error};
 use bitflags::bitflags;
 use foreign_types::{foreign_type, ForeignType};
+use std::sync::Once;
 use std::{convert::TryFrom, ffi::CString, mem::MaybeUninit, ptr};
 use vectorscan_rs_sys as hs;
+
+unsafe extern "C" fn hs_rust_alloc(size: usize) -> *mut std::os::raw::c_void {
+    libc::malloc(size)
+}
+
+unsafe extern "C" fn hs_rust_free(ptr: *mut std::os::raw::c_void) {
+    libc::free(ptr)
+}
+
+static ALLOCATOR_INIT: Once = Once::new();
+
+fn ensure_allocator_init() {
+    ALLOCATOR_INIT.call_once(|| unsafe {
+        hs::hs_set_allocator(Some(hs_rust_alloc), Some(hs_rust_free));
+    });
+}
 
 foreign_type! {
     #[derive(Debug)]
@@ -81,6 +98,7 @@ impl Pattern {
 
 impl Database {
     pub fn new(patterns: Vec<Pattern>, mode: ScanMode) -> Result<Self, Error> {
+        ensure_allocator_init();
         let mut c_exprs = Vec::with_capacity(patterns.len());
         let mut c_flags = Vec::with_capacity(patterns.len());
         let mut c_ids = Vec::with_capacity(patterns.len());
@@ -125,6 +143,7 @@ impl Database {
 
     /// Serializes the database using `hs_serialize_database`.
     pub fn serialize(&self) -> Result<SerializedDatabase, Error> {
+        ensure_allocator_init();
         let mut bytes = MaybeUninit::zeroed();
         let mut length = MaybeUninit::zeroed();
 
@@ -140,6 +159,7 @@ impl Database {
 
     /// Deserializes a database using `hs_deserialize_database`.
     pub fn deserialize(sdb: SerializedDatabase) -> Result<Self, Error> {
+        ensure_allocator_init();
         let mut db_ptr = MaybeUninit::zeroed();
         unsafe {
             hs::hs_deserialize_database(sdb.bytes, sdb.length, db_ptr.as_mut_ptr())
@@ -173,6 +193,7 @@ impl TryFrom<&[u8]> for Database {
     type Error = Error;
 
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        ensure_allocator_init();
         let mut db_ptr = MaybeUninit::zeroed();
         unsafe {
             hs::hs_deserialize_database(data.as_ptr() as *const _, data.len(), db_ptr.as_mut_ptr())
@@ -215,8 +236,6 @@ impl SerializedDatabase {
 
 impl Drop for SerializedDatabase {
     fn drop(&mut self) {
-        // XXX should technically call the deallocator function set in `hs_set_misc_allocator`,
-        // but we never call that here, and the defaults are malloc/free
         unsafe {
             libc::free(self.bytes as *mut libc::c_void);
         }
@@ -237,6 +256,7 @@ impl Clone for Scratch {
 
 impl Scratch {
     pub fn new(database: &Database) -> Result<Self, Error> {
+        ensure_allocator_init();
         let mut scratch = MaybeUninit::zeroed();
         unsafe {
             hs::hs_alloc_scratch(database.as_ptr(), scratch.as_mut_ptr())
