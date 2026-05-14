@@ -184,6 +184,17 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_gnu: bool) {
             .define("BUILD_SVE2_BITPERM", "OFF");
     }
 
+    // Vectorscan 5.4.11's dispatcher.c unconditionally references avx2_/avx512_/avx512vbmi_
+    // symbols on x86_64 (only AVX512 has a DISABLE_*_DISPATCH guard, AVX2 has none),
+    // so a fat_runtime build needs all three ISA variants compiled or the link fails.
+    // 5.4.12's cflags-x86.cmake forced these on automatically; 5.4.11 doesn't, so do it here.
+    #[cfg(target_arch = "x86_64")]
+    if cfg!(feature = "fat_runtime") {
+        cfg.define("BUILD_AVX2", "ON");
+        cfg.define("BUILD_AVX512", "ON");
+        cfg.define("BUILD_AVX512VBMI", "ON");
+    }
+
     if is_windows_gnu {
         cfg.define("GNUCC_ARCH", "x86-64");
         cfg.define("TUNE_FLAG", "generic");
