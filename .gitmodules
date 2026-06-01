@@ -1,0 +1,3 @@
+[submodule "vectorscan-rs-sys/vectorscan"]
+	path = vectorscan-rs-sys/vectorscan
+	url = https://github.com/VectorCamp/vectorscan.git
