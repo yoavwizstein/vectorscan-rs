@@ -49,14 +49,15 @@ index a817e744..41e8085c 100644
  #if defined(ARCH_IA32) || defined(ARCH_X86_64)
  #include "util/arch/x86/cpuid_inline.h"
  #include "util/join.h"
-@@ -57,30 +91,37 @@
+@@ -57,30 +91,38 @@
          return (RTYPE)HS_ARCH_ERROR;                                           \
      }                                                                          \
                                                                                 \
 +    /* dispatch routing pointer for this function */                           \
 +    /* initially point it at the resolve function */                           \
 +    static RTYPE JOIN(resolve_, NAME)(__VA_ARGS__);                            \
-+    static RTYPE (* JOIN(fat_dispatch_, NAME))(__VA_ARGS__) =                  \
++    __attribute__((visibility("hidden")))                                      \
++    RTYPE (* JOIN(fat_dispatch_, NAME))(__VA_ARGS__) =                         \
 +        &JOIN(resolve_, NAME);                                                 \
 +                                                                               \
      /* resolver */                                                             \
@@ -104,14 +105,15 @@ index a817e744..41e8085c 100644
  
  #elif defined(ARCH_AARCH64)
  #include "util/arch/arm/cpuid_inline.h"
-@@ -97,99 +138,223 @@
+@@ -97,99 +138,224 @@
          return (RTYPE)HS_ARCH_ERROR;                                           \
      }                                                                          \
                                                                                 \
 +    /* dispatch routing pointer for this function */                           \
 +    /* initially point it at the resolve function */                           \
 +    static RTYPE JOIN(resolve_, NAME)(__VA_ARGS__);                            \
-+    static RTYPE (* JOIN(fat_dispatch_, NAME))(__VA_ARGS__) =                  \
++    __attribute__((visibility("hidden")))                                      \
++    RTYPE (* JOIN(fat_dispatch_, NAME))(__VA_ARGS__) =                         \
 +        &JOIN(resolve_, NAME);                                                 \
 +                                                                               \
      /* resolver */                                                             \
