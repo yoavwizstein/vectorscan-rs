@@ -242,6 +242,20 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_msvc: bool) 
         cfg.define("CMAKE_POLICY_DEFAULT_CMP0167", "OLD");
         cfg.define("Boost_NO_BOOST_CMAKE", "ON");
         cfg.define("Boost_NO_SYSTEM_PATHS", "ON");
+        // Match the consuming crate's CRT linkage: when the target is built with
+        // +crt-static (e.g. via .cargo/config rustflags) link the static MSVC
+        // runtime (/MT), otherwise the dynamic one (/MD). Mixing them makes the
+        // final link fail with unresolved __imp_* CRT externals (_aligned_malloc,
+        // _W_Getmonths, ...). build.rs always builds the Release config, so this
+        // is the complete choice (CMP0091 NEW; CMake >= 3.15).
+        let crt_static = std::env::var("CARGO_CFG_TARGET_FEATURE")
+            .unwrap_or_default()
+            .split(',')
+            .any(|f| f == "crt-static");
+        cfg.define(
+            "CMAKE_MSVC_RUNTIME_LIBRARY",
+            if crt_static { "MultiThreaded" } else { "MultiThreadedDLL" },
+        );
         // The MSVC fat-runtime CMake path (msvc-support.patch) invokes cmake/fat_rename.py
         // (a COFF whole-variant symbol renamer); place it where
         // ${PROJECT_SOURCE_DIR}/cmake expects it. Harmless for non-fat builds
