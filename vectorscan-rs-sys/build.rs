@@ -256,15 +256,16 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_msvc: bool) 
             "CMAKE_MSVC_RUNTIME_LIBRARY",
             if crt_static { "MultiThreaded" } else { "MultiThreadedDLL" },
         );
-        // The MSVC fat-runtime CMake path (msvc-support.patch) invokes cmake/fat_rename.py
-        // (a COFF whole-variant symbol renamer); place it where
+        // The MSVC fat-runtime CMake path (msvc-support.patch) invokes
+        // cmake/fat_rename.ps1 (a COFF whole-variant symbol renamer via
+        // PowerShell, so no Python is required); place it where
         // ${PROJECT_SOURCE_DIR}/cmake expects it. Harmless for non-fat builds
         // (the patched CMake only references it inside the MSVC fat branch).
         fs::copy(
-            manifest_dir.join("fat_rename.py"),
-            vectorscan_src_dir.join("cmake").join("fat_rename.py"),
+            manifest_dir.join("fat_rename.ps1"),
+            vectorscan_src_dir.join("cmake").join("fat_rename.ps1"),
         )
-        .expect("Failed to copy fat_rename.py into vectorscan source tree");
+        .expect("Failed to copy fat_rename.ps1 into vectorscan source tree");
         // Build only the `hs` static lib, not the default `all`/`install`
         // target. That avoids compiling the unit tests and util test-helpers
         // (e.g. util/expressions.cpp needs POSIX dirent.h), which don't build
@@ -274,7 +275,7 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_msvc: bool) 
 
     if cfg!(feature = "fat_runtime") {
         if is_windows_msvc {
-            // MSVC fat runtime renames symbols via cmake/fat_rename.py, a
+            // MSVC fat runtime renames symbols via cmake/fat_rename.ps1, a
             // self-contained COFF pass that needs no libc symbol list.
         } else {
             let libc_path = String::from_utf8(
@@ -323,7 +324,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=patches");
-    println!("cargo:rerun-if-changed=fat_rename.py");
+    println!("cargo:rerun-if-changed=fat_rename.ps1");
 
     // CARGO_FEATURE_* env vars are set by cargo when features are enabled.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FAT_RUNTIME");

@@ -3,7 +3,7 @@ MSVC (clang-cl) support for Vectorscan 5.4.11.
 Applied after the 01-05 backports:
   * src/ue2common.h    - guard the alignof macro to C only
   * src/util/alloc.cpp - free _aligned_malloc memory with _aligned_free
-  * CMakeLists.txt     - MSVC fat-runtime COFF symbol rename (cmake/fat_rename.py)
+  * CMakeLists.txt     - MSVC fat-runtime COFF symbol rename (cmake/fat_rename.ps1)
 diff --git a/src/ue2common.h b/src/ue2common.h
 --- a/src/ue2common.h
 +++ b/src/ue2common.h
@@ -37,12 +37,12 @@ index a11670e..7ab649d 100644
              endif (BUILD_AVX512VBMI)
  
 +            if (MSVC)
-+                find_program(PYTHON_EXE NAMES python python3 REQUIRED)
++                find_program(POWERSHELL_EXE NAMES powershell pwsh REQUIRED)
 +                foreach (fatv core2 corei7 avx2 avx512 avx512vbmi)
 +                    if (TARGET hs_exec_${fatv})
 +                        set_target_properties(hs_exec_${fatv} PROPERTIES RULE_LAUNCH_COMPILE "")
 +                        add_custom_target(rename_hs_exec_${fatv} ALL
-+                            COMMAND ${PYTHON_EXE} ${PROJECT_SOURCE_DIR}/cmake/fat_rename.py
++                            COMMAND ${POWERSHELL_EXE} -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/cmake/fat_rename.ps1
 +                                    ${fatv} ${CMAKE_MODULE_PATH}/keep.syms.in
 +                                    ${CMAKE_BINARY_DIR}/CMakeFiles/hs_exec_${fatv}.dir
 +                            COMMENT "COFF symbol rename for ${fatv} fat-runtime variant"
