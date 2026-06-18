@@ -121,7 +121,12 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_msvc: bool) 
         };
     }
 
-    cfg.profile("Release")
+    // On MSVC build RelWithDebInfo so the static lib carries CodeView debug info
+    // (optimized + PDB-able). The consuming binary keeps debug info for
+    // stacktraces, and a plain Release vectorscan would contribute no symbols.
+    // RelWithDebInfo still maps to RELEASE_BUILD=TRUE in vectorscan (fat runtime
+    // gate passes) and the CRT stays /MT via CMAKE_MSVC_RUNTIME_LIBRARY below.
+    cfg.profile(if is_windows_msvc { "RelWithDebInfo" } else { "Release" })
         .define("CMAKE_INSTALL_INCLUDEDIR", &include_dir)
         .define("CMAKE_VERBOSE_MAKEFILE", "ON")
         .define("BUILD_SHARED_LIBS", "OFF")
