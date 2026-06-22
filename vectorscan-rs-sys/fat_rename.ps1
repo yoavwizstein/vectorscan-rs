@@ -21,10 +21,13 @@
 # allocator hooks in hs_exec_common -- are never in the map, so references to
 # them are left intact and still resolve at link time.
 
+param(
+    [Parameter(Mandatory)][string]$prefix,
+    [Parameter(Mandatory)][string]$keepfile,
+    [Parameter(Mandatory)][string]$objdir
+)
+
 $ErrorActionPreference = 'Stop'
-$prefix   = $args[0]
-$keepfile = $args[1]
-$objdir   = $args[2]
 
 # External, defined sections (uppercase == external). The membership test below
 # is case-sensitive (-cnotcontains) so locals (t/d/b/r) are excluded, matching

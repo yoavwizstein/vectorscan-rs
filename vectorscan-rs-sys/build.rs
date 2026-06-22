@@ -320,6 +320,28 @@ fn build_vectorscan(manifest_dir: &Path, out_dir: &Path, is_windows_msvc: bool) 
     }
 }
 
+/// Detect the host C++ compiler (via `c++ -v`) and emit the matching C++
+/// standard library to link against: `stdc++` for GCC, `c++` for Clang.
+/// Panics if neither toolchain is detected.
+fn link_cpp_stdlib() {
+    let compiler_version_out = String::from_utf8(
+        Command::new("c++")
+            .args(["-v"])
+            .output()
+            .expect("Failed to get C++ compiler version")
+            .stderr,
+    )
+    .unwrap();
+
+    if compiler_version_out.contains("gcc") {
+        println!("cargo:rustc-link-lib=stdc++");
+    } else if compiler_version_out.contains("clang") {
+        println!("cargo:rustc-link-lib=c++");
+    } else {
+        panic!("No compatible compiler found: either clang or gcc is needed");
+    }
+}
+
 fn main() {
     let target_os = env("CARGO_CFG_TARGET_OS");
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
@@ -362,27 +384,12 @@ fn main() {
         // #pragma comment(lib) directives clang-cl embeds in the objects, so no
         // explicit C++ standard library needs to be added here.
     } else {
-        let compiler_version_out = String::from_utf8(
-            Command::new("c++")
-                .args(["-v"])
-                .output()
-                .expect("Failed to get C++ compiler version")
-                .stderr,
-        )
-        .unwrap();
-
-        if compiler_version_out.contains("gcc") {
-            println!("cargo:rustc-link-lib=stdc++");
-        } else if compiler_version_out.contains("clang") {
-            println!("cargo:rustc-link-lib=c++");
-        } else {
-            panic!("No compatible compiler found: either clang or gcc is needed");
-        }
+        link_cpp_stdlib();
 
         if let Some(lib_dir) = std::env::var_os("VECTORSCAN_LIB_DIR") {
             println!("cargo:rustc-link-search={}", lib_dir.display());
         } else {
-            build_vectorscan(&manifest_dir, &out_dir, false);
+            build_vectorscan(&manifest_dir, &out_dir, is_windows_msvc);
         }
 
         println!("cargo:rustc-link-lib=static=vs");
