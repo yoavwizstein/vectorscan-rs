@@ -1,0 +1,71 @@
+MSVC (clang-cl) support for Vectorscan 5.4.11.
+
+Applied after the 01-05 backports:
+  * src/ue2common.h    - guard the alignof macro to C only
+  * src/util/alloc.cpp - free _aligned_malloc memory with _aligned_free
+  * CMakeLists.txt     - MSVC fat-runtime COFF symbol rename (cmake/fat_rename.ps1)
+diff --git a/src/ue2common.h b/src/ue2common.h
+--- a/src/ue2common.h
++++ b/src/ue2common.h
+@@ -92,5 +92,7 @@
+ /** no, seriously, inline it, even if building in debug mode */
+ #define really_really_inline inline __attribute__ ((always_inline, unused))
+ #define never_inline __attribute__ ((noinline))
+-#define alignof __alignof
++#if !defined(__cplusplus)
++#define alignof __alignof
++#endif
+ #define HAVE_TYPEOF 1
+diff --git a/src/util/alloc.cpp b/src/util/alloc.cpp
+--- a/src/util/alloc.cpp
++++ b/src/util/alloc.cpp
+@@ -87,6 +87,8 @@ void aligned_free_internal(void *ptr) {
+
+ #if defined(__MINGW32__) || defined(__MINGW64__)
+     __mingw_aligned_free(ptr);
++#elif defined(HAVE__ALIGNED_MALLOC)
++    _aligned_free(ptr);
+ #else
+     free(ptr);
+ #endif
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a11670e..7ab649d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -962,6 +962,23 @@ else ()
+                     )
+             endif (BUILD_AVX512VBMI)
+ 
++            if (MSVC)
++                find_program(POWERSHELL_EXE NAMES powershell pwsh REQUIRED)
++                foreach (fatv core2 corei7 avx2 avx512 avx512vbmi)
++                    if (TARGET hs_exec_${fatv})
++                        set_target_properties(hs_exec_${fatv} PROPERTIES RULE_LAUNCH_COMPILE "")
++                        add_custom_target(rename_hs_exec_${fatv} ALL
++                            COMMAND ${POWERSHELL_EXE} -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/cmake/fat_rename.ps1
++                                    ${fatv} ${CMAKE_MODULE_PATH}/keep.syms.in
++                                    ${CMAKE_BINARY_DIR}/CMakeFiles/hs_exec_${fatv}.dir
++                            COMMENT "COFF symbol rename for ${fatv} fat-runtime variant"
++                            VERBATIM)
++                        add_dependencies(rename_hs_exec_${fatv} hs_exec_${fatv})
++                        set_property(GLOBAL APPEND PROPERTY FAT_RENAME_TARGETS rename_hs_exec_${fatv})
++                    endif()
++                endforeach()
++            endif()
++
+             add_library(hs_exec_common OBJECT
+                 ${hs_exec_common_SRCS}
+                 src/dispatcher.c
+@@ -1215,3 +1238,12 @@ if(BUILD_BENCHMARKS)
+ endif()
+ 
+ add_subdirectory(doc/dev-reference)
++
++if (MSVC AND FAT_RUNTIME)
++    get_property(_fat_rename_targets GLOBAL PROPERTY FAT_RENAME_TARGETS)
++    foreach (_lib hs hs_runtime)
++        if (TARGET ${_lib} AND _fat_rename_targets)
++            add_dependencies(${_lib} ${_fat_rename_targets})
++        endif()
++    endforeach()
++endif()
