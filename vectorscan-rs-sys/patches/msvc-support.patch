@@ -4,6 +4,7 @@ Applied after the 01-05 backports:
   * src/ue2common.h    - guard the alignof macro to C only
   * src/util/alloc.cpp - free _aligned_malloc memory with _aligned_free
   * CMakeLists.txt     - MSVC fat-runtime COFF symbol rename (cmake/fat_rename.ps1)
+  * CMakeLists.txt     - build the Ragel parser unsigned-char under clang-cl (-Xclang -fno-signed-char)
 diff --git a/src/ue2common.h b/src/ue2common.h
 --- a/src/ue2common.h
 +++ b/src/ue2common.h
@@ -32,6 +33,20 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
 index a11670e..7ab649d 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
+@@ -192,6 +192,13 @@ if (CORRECT_PCRE_VERSION AND PCRE_BUILD_SOURCE AND BUILD_STATIC_LIBS)
+ endif()
+ 
+ set(RAGEL_C_FLAGS "-Wno-unused -funsigned-char")
++# clang-cl ignores GNU-style -funsigned-char (warns "unknown argument ignored").
++# The Ragel parser (Parser.rl: alphtype unsigned char) then reads pattern bytes
++# >= 0x80 as negative under the MSVC default signed char and rejects valid
++# regexes ("Parse error at index N"). Use the clang-cl-honored spelling here.
++if (MSVC)
++    set(RAGEL_C_FLAGS "-Wno-unused -Xclang -fno-signed-char")
++endif()
+ 
+ set_source_files_properties(
+     src/parser/Parser.cpp
 @@ -962,6 +962,23 @@ else ()
                      )
              endif (BUILD_AVX512VBMI)
